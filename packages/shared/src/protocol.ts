@@ -403,7 +403,7 @@ const ExtGameInfoSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string(),
-  hasLeaderboard: z.boolean(),
+  hasLeaderboard: z.boolean().default(false),
 });
 export const ExtGamesSchema = z.object({
   type: z.literal("ext.games"),
