@@ -335,6 +335,10 @@ describe("idle timeout", () => {
     const { conn: driver } = fakeConn("d1", roomId);
     registry.add(driver);
 
+    // Return the same frame as SESSION so no auto-tick is detected and only
+    // the player-idle timeout applies.
+    vi.mocked(api.getFrame).mockResolvedValue({ frame: SESSION.frame, tick: 0 });
+
     await startExtGame(driver, "game-1", registry, BASE);
     vi.mocked(broadcast.broadcastToRoom).mockClear();
 

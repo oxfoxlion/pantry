@@ -11,6 +11,9 @@ import { logger } from "../logger.js";
 const POLL_MS = 200;
 // End a game if the driver sends no input for this long.
 const IDLE_MS = 120_000;
+// End a game if the frame hasn't changed for this long — catches AI-tick games
+// that reach a "game over" screen and freeze without deleting the session.
+const STALE_FRAME_MS = 8_000;
 
 type ActiveExtGame = {
   sessionId: string;
@@ -25,6 +28,10 @@ type ActiveExtGame = {
   lastFrame: string;
   startedAt: number;
   lastInputAt: number;
+  lastFrameChangeAt: number;
+  // True once we've seen the frame change without a player input — confirms this
+  // is an AI-ticking game, so stale-frame detection applies.
+  hadAutoTick: boolean;
 };
 
 const games = new Map<string, ActiveExtGame>();
@@ -113,13 +120,16 @@ export async function startExtGame(
     lastFrame: session.frame,
     startedAt: now,
     lastInputAt: now,
+    lastFrameChangeAt: now,
+    hadAutoTick: false,
   };
   games.set(roomId, g);
 
   g.pollTimer = setInterval(async () => {
     const game = games.get(roomId);
     if (!game) return;
-    if (Date.now() - game.lastInputAt >= IDLE_MS) {
+    const now2 = Date.now();
+    if (now2 - game.lastInputAt >= IDLE_MS) {
       logger.info({ roomId, driver: game.driverName }, "ext game idle timeout");
       endExtGame(roomId, "quit", registry);
       return;
@@ -127,13 +137,19 @@ export async function startExtGame(
     try {
       const result = await getFrame(baseUrl, game.sessionId);
       if (!result) {
-        endExtGame(roomId, "quit", registry);
+        endExtGame(roomId, "loss", registry);
         return;
       }
       if (result.frame !== game.lastFrame) {
         game.lastTick++;
-        game.lastInputAt = Date.now();
+        game.lastInputAt = now2;
+        game.lastFrameChangeAt = now2;
+        game.hadAutoTick = true;
         pushFrame(game, result.frame, game.lastTick);
+      } else if (game.hadAutoTick && now2 - game.lastFrameChangeAt >= STALE_FRAME_MS) {
+        // AI-tick game whose frame froze — hit a game-over screen.
+        logger.info({ roomId, driver: game.driverName }, "ext game stale frame, ending");
+        endExtGame(roomId, "loss", registry);
       }
     } catch (err) {
       logger.warn({ err, roomId }, "ext game poll error");
